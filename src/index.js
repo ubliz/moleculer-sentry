@@ -7,7 +7,6 @@
 'use strict'
 
 const Sentry = require('@sentry/node')
-const SentryUtils = require('@sentry/utils')
 
 module.exports = {
   name: 'sentry',
@@ -125,10 +124,17 @@ module.exports = {
           scope.setUser(metric.meta[userMetaKey])
         }
 
-        Sentry.captureEvent({
-          message: metric.error.message,
-          stacktrace: this.getNormalizedStackTrace(metric.error.stack)
-        })
+        // In Sentry 9.x, we should use captureException for errors with stack traces
+        // or captureMessage for simple messages
+        if (metric.error.stack) {
+          const error = new Error(metric.error.message)
+          error.stack = Array.isArray(metric.error.stack) 
+            ? metric.error.stack.join('\n') 
+            : metric.error.stack
+          Sentry.captureException(error)
+        } else {
+          Sentry.captureMessage(metric.error.message, 'error')
+        }
       })
     },
 
@@ -136,7 +142,7 @@ module.exports = {
      * Check if sentry is configured or not
      */
     isSentryReady() {
-      return Sentry.getCurrentHub().getClient() !== undefined
+      return Sentry.getClient() !== undefined
     },
 
     /**
@@ -166,7 +172,8 @@ module.exports = {
   async stopped() {
     if (this.isSentryReady()) {
       await Sentry.flush()
-      SentryUtils.GLOBAL_OBJ.__SENTRY__ = undefined
+      // In Sentry 9.x, we can use close() instead of manually clearing the global object
+      await Sentry.close()
     }
   }
 }
