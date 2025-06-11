@@ -25,6 +25,8 @@ module.exports = {
       options: {},
       /** @type {String?} Name of the meta containing user infos. */
       userMetaKey: null,
+      /** @type {Array<Number|String>?} Array of error codes to exclude from reporting. */
+      excludeErrorCodes: null,
     }
   },
 
@@ -79,6 +81,26 @@ module.exports = {
      */
     getUserMetaKey() {
       return this.settings.sentry.userMetaKey
+    },
+
+    /**
+     * Check if an error should be excluded based on its code
+     *
+     * @param {Object} error
+     * @returns {Boolean}
+     */
+    isErrorExcluded(error) {
+      const excludeErrorCodes = this.settings.sentry.excludeErrorCodes
+      
+      if (!excludeErrorCodes || !Array.isArray(excludeErrorCodes) || excludeErrorCodes.length === 0) {
+        return false
+      }
+
+      if (!error || error.code === undefined || error.code === null) {
+        return false
+      }
+
+      return excludeErrorCodes.includes(error.code)
     },
 
     /**
@@ -153,7 +175,7 @@ module.exports = {
      */
     onTracingEvent(metrics) {
       metrics.forEach((metric) => {
-        if (metric.error && this.isSentryReady() && (!this.shouldReport || this.shouldReport(metric) == true)) {
+        if (metric.error && this.isSentryReady() && !this.isErrorExcluded(metric.error) && (!this.shouldReport || this.shouldReport(metric) == true)) {
           this.sendSentryError(metric)
         }
       })

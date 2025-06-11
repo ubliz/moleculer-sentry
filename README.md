@@ -32,7 +32,31 @@ module.exports = {
       options: {},
       /** @type {String?} Name of the meta containing user infos. */
       userMetaKey: null,
+      /** @type {Array<Number|String>?} Array of error codes to exclude from reporting. */
+      excludeErrorCodes: null,
     },
   }
 }
 ```
+
+## Error Code Exclusion
+
+You can configure the mixin to exclude specific error codes from being reported to Sentry. This is useful for filtering out expected errors like validation errors or not found errors.
+
+```js
+module.exports = {
+  mixins: [SentryMixin],
+  settings: {
+    sentry: {
+      dsn: 'your-sentry-dsn',
+      excludeErrorCodes: [404, 400, 'VALIDATION_ERROR', 'NOT_FOUND']
+    }
+  }
+}
+```
+
+The `excludeErrorCodes` setting accepts an array of:
+- **Numeric codes**: HTTP status codes or custom numeric error codes (e.g., `404`, `400`, `500`)
+- **String codes**: Custom error codes or error types (e.g., `'VALIDATION_ERROR'`, `'NOT_FOUND'`)
+
+Errors with codes matching any value in this array will not be sent to Sentry.

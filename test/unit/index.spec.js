@@ -229,3 +229,193 @@ describe('sendSentryError with shouldReport', () => {
   })
 
 })
+
+describe('Error Code Exclusion', () => {
+  it('should not exclude errors when excludeErrorCodes is not configured', async () => {
+    const broker = new ServiceBroker({ logger: false })
+    const service = broker.createService(SentryServiceWithDSN)
+    
+    await broker.start()
+    
+    expect(service.isErrorExcluded({ code: 404 })).toBe(false)
+    expect(service.isErrorExcluded({ code: 500 })).toBe(false)
+    expect(service.isErrorExcluded({ code: 'VALIDATION_ERROR' })).toBe(false)
+    
+    await broker.stop()
+  })
+
+  it('should not exclude errors when excludeErrorCodes is empty', async () => {
+    const broker = new ServiceBroker({ logger: false })
+    const service = broker.createService({
+      mixins: [SentryMixin],
+      settings: { 
+        sentry: { 
+          dsn: 'https://abc:xyz@localhost:1234/123',
+          excludeErrorCodes: []
+        } 
+      }
+    })
+    
+    await broker.start()
+    
+    expect(service.isErrorExcluded({ code: 404 })).toBe(false)
+    expect(service.isErrorExcluded({ code: 500 })).toBe(false)
+    
+    await broker.stop()
+  })
+
+  it('should exclude errors with matching numeric codes', async () => {
+    const broker = new ServiceBroker({ logger: false })
+    const service = broker.createService({
+      mixins: [SentryMixin],
+      settings: { 
+        sentry: { 
+          dsn: 'https://abc:xyz@localhost:1234/123',
+          excludeErrorCodes: [404, 500]
+        } 
+      }
+    })
+    
+    await broker.start()
+    
+    expect(service.isErrorExcluded({ code: 404 })).toBe(true)
+    expect(service.isErrorExcluded({ code: 500 })).toBe(true)
+    expect(service.isErrorExcluded({ code: 400 })).toBe(false)
+    expect(service.isErrorExcluded({ code: 503 })).toBe(false)
+    
+    await broker.stop()
+  })
+
+  it('should exclude errors with matching string codes', async () => {
+    const broker = new ServiceBroker({ logger: false })
+    const service = broker.createService({
+      mixins: [SentryMixin],
+      settings: { 
+        sentry: { 
+          dsn: 'https://abc:xyz@localhost:1234/123',
+          excludeErrorCodes: ['VALIDATION_ERROR', 'NOT_FOUND']
+        } 
+      }
+    })
+    
+    await broker.start()
+    
+    expect(service.isErrorExcluded({ code: 'VALIDATION_ERROR' })).toBe(true)
+    expect(service.isErrorExcluded({ code: 'NOT_FOUND' })).toBe(true)
+    expect(service.isErrorExcluded({ code: 'INTERNAL_ERROR' })).toBe(false)
+    expect(service.isErrorExcluded({ code: 'TIMEOUT' })).toBe(false)
+    
+    await broker.stop()
+  })
+
+  it('should exclude errors with mixed numeric and string codes', async () => {
+    const broker = new ServiceBroker({ logger: false })
+    const service = broker.createService({
+      mixins: [SentryMixin],
+      settings: { 
+        sentry: { 
+          dsn: 'https://abc:xyz@localhost:1234/123',
+          excludeErrorCodes: [404, 'VALIDATION_ERROR', 500, 'NOT_FOUND']
+        } 
+      }
+    })
+    
+    await broker.start()
+    
+    expect(service.isErrorExcluded({ code: 404 })).toBe(true)
+    expect(service.isErrorExcluded({ code: 'VALIDATION_ERROR' })).toBe(true)
+    expect(service.isErrorExcluded({ code: 500 })).toBe(true)
+    expect(service.isErrorExcluded({ code: 'NOT_FOUND' })).toBe(true)
+    expect(service.isErrorExcluded({ code: 400 })).toBe(false)
+    expect(service.isErrorExcluded({ code: 'TIMEOUT' })).toBe(false)
+    
+    await broker.stop()
+  })
+
+  it('should handle errors without code', async () => {
+    const broker = new ServiceBroker({ logger: false })
+    const service = broker.createService({
+      mixins: [SentryMixin],
+      settings: { 
+        sentry: { 
+          dsn: 'https://abc:xyz@localhost:1234/123',
+          excludeErrorCodes: [404, 500]
+        } 
+      }
+    })
+    
+    await broker.start()
+    
+    expect(service.isErrorExcluded({})).toBe(false)
+    expect(service.isErrorExcluded({ code: null })).toBe(false)
+    expect(service.isErrorExcluded({ code: undefined })).toBe(false)
+    expect(service.isErrorExcluded(null)).toBe(false)
+    
+    await broker.stop()
+  })
+
+  it('should not send excluded errors to Sentry', async () => {
+    const broker = new ServiceBroker({ logger: false })
+    const service = broker.createService({
+      mixins: [SentryMixin],
+      settings: { 
+        sentry: { 
+          dsn: 'https://abc:xyz@localhost:1234/123',
+          excludeErrorCodes: [404, 'VALIDATION_ERROR']
+        } 
+      }
+    })
+    
+    await broker.start()
+    
+    service.sendSentryError = jest.fn()
+    
+    // Test excluded numeric code
+    broker.emit(SentryMixin.settings.sentry.tracingEventName, [{ error: { code: 404, message: 'Not found' } }])
+    expect(service.sendSentryError).not.toHaveBeenCalled()
+    
+    // Test excluded string code
+    broker.emit(SentryMixin.settings.sentry.tracingEventName, [{ error: { code: 'VALIDATION_ERROR', message: 'Validation failed' } }])
+    expect(service.sendSentryError).not.toHaveBeenCalled()
+    
+    // Test non-excluded code
+    broker.emit(SentryMixin.settings.sentry.tracingEventName, [{ error: { code: 500, message: 'Internal error' } }])
+    expect(service.sendSentryError).toHaveBeenCalledTimes(1)
+    
+    await broker.stop()
+  })
+})
+
+describe('reportShouldBe', () => {
+  const broker = new ServiceBroker({ logger: false })
+  const service = broker.createService({
+    mixins: [SentryMixin],
+    settings: { sentry: { dsn: 'https://abc:xyz@localhost:1234/123' } },
+    methods: {
+      shouldReport({ error }) {
+        return error.code !== 500
+      }
+    }
+  })
+
+  beforeAll(() => broker.start())
+  afterAll(() => broker.stop())
+
+  it('should not send reportShouldBe (code 500)', () => {
+    service.sendSentryError = jest.fn()
+    const error = { code: 500 }
+
+    broker.emit(SentryMixin.settings.sentry.tracingEventName, [{ error }])
+
+    expect(service.sendSentryError).not.toHaveBeenCalled()
+  })
+
+  it('should sendSentryError (code 404)', () => {
+    service.sendSentryError = jest.fn()
+    const error = { code: 404 }
+
+    broker.emit(SentryMixin.settings.sentry.tracingEventName, [{ error }])
+
+    expect(service.sendSentryError).toHaveBeenCalledWith({ error })
+  })
+})
