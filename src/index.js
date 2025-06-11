@@ -148,15 +148,14 @@ module.exports = {
 
         // In Sentry 9.x, we should use captureException for errors with stack traces
         // or captureMessage for simple messages
+        const error = new Error(metric.error.message)
+        error.name = metric.error.name;
         if (metric.error.stack) {
-          const error = new Error(metric.error.message)
           error.stack = Array.isArray(metric.error.stack) 
             ? metric.error.stack.join('\n') 
             : metric.error.stack
-          Sentry.captureException(error)
-        } else {
-          Sentry.captureMessage(metric.error.message, 'error')
         }
+        Sentry.captureException(error)
       })
     },
 
@@ -165,6 +164,15 @@ module.exports = {
      */
     isSentryReady() {
       return Sentry.getClient() !== undefined
+    },
+
+    /**
+     * Get the Sentry instance for other mixins to use
+     * 
+     * @returns {Object} The Sentry instance
+     */
+    getSentryInstance() {
+      return Sentry;
     },
 
     /**
@@ -182,12 +190,11 @@ module.exports = {
     }
   },
 
-  started() {
+  async created() {
     const dsn = this.settings.sentry.dsn
     const options = this.settings.sentry.options
-
     if (dsn) {
-      Sentry.init({ dsn, ...options })
+      await Sentry.init({ dsn, ...options })
     }
   },
 
